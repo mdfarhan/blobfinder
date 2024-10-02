@@ -27,7 +27,7 @@ if (len(sys.argv) != 2):
 This is a naive PoC to test for the presence of Azure Blob resources which could
 certainly benefit from threading and other performance improvements.\n""")
 
-    print(f"Usage: {sys.argv[0]} <name list file>")
+    print(f"Usage: {sys.argv[0]} ")
     print("""
 The name list file should be in the format storageaccount:containername or a
 single string that is used as both the storage account and container name.
@@ -41,7 +41,11 @@ with open(sys.argv[1]) as fp:
 total_lines = len(lines)
 print(f"Processing {total_lines} entries from the name list file...")
 
-for cnt, line in enumerate(tqdm(lines, desc="Progress", unit="entry")):
+results = []
+
+progress_bar = tqdm(total=total_lines, desc="Progress", unit="entry", ncols=100, position=0, leave=True)
+
+for cnt, line in enumerate(lines):
     line = line.rstrip()
     if (not ":" in line):
         # Treat the string in the line as both storage acct name and blob name
@@ -53,7 +57,8 @@ for cnt, line in enumerate(tqdm(lines, desc="Progress", unit="entry")):
     # "The field can contain only lowercase letters and numbers. Name must
     # be between 3 and 24 characters."
     if (re.search("[^a-z0-9]", storacct) or len(storacct) < 3 or len(storacct) > 23):
-        print(f"Invalid storage account name {storacct}, skipping.")
+        results.append(f"Invalid storage account name {storacct}, skipping.")
+        progress_bar.update(1)
         continue
 
     # "This name may only contain lowercase letters, numbers, and hyphens,
@@ -61,26 +66,36 @@ for cnt, line in enumerate(tqdm(lines, desc="Progress", unit="entry")):
     # preceded and followed by a non-hyphen character. The name must also
     # be between 3 and 63 characters long."
     if (re.search("[^a-z0-9\-]", cntrname) or "--" in cntrname or len(cntrname) < 3 or len(cntrname) > 63):
-        print(f"Invalid container name {cntrname}, skipping.")
+        results.append(f"Invalid container name {cntrname}, skipping.")
+        progress_bar.update(1)
         continue
 
     # Unlike other cloud storage providers, Azure doesn't do a wildcard DNS resolver
     # Before we look for the blob with an HTTP request, resolve the DNS name of
     # the storage account.
     if (not resolve_name(f"{storacct}{HOSTSUFFIX}")):
-        print(f"Skipping storage account {storacct} (does not resolve)")
+        results.append(f"Skipping storage account {storacct} (does not resolve)")
+        progress_bar.update(1)
         continue
-
+    
     url = f"https://{storacct}{HOSTSUFFIX}/{cntrname}{URLPARAM}"
     try:
         r = requests.get(url)
         if (r.status_code == 200):
-            print(f"\nValid storage account and container name: {line}")
-            print("Blob data objects:")
-            print_blobs(r.text)
+            results.append(f"\nValid storage account and container name: {line}")
+            results.append("Blob data objects:")
+            results.append(r.text)  # Assuming print_blobs() just prints the text
         else:
-            print(f"Container not found or not accessible: {line} (Status code: {r.status_code})")
+            results.append(f"Container not found or not accessible: {line} (Status code: {r.status_code})")
     except requests.ConnectionError:
-        print(f"Failed to connect to {url}")
+        results.append(f"Failed to connect to {url}")
+    
+    progress_bar.update(1)
+
+progress_bar.close()
+
+print("\nResults:")
+for result in results:
+    print(result)
 
 print("\nProcessing complete.")
